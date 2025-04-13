@@ -32,9 +32,6 @@ dt = 1 / cap.get(cv.CAP_PROP_FPS)
 while True:
     ret, frame = cap.read()
 
-    #vectors = list()
-    old_speed = 0
-
     if not ret:
             print('프레임 획득 실패')
             sys.exit()
@@ -72,6 +69,7 @@ while True:
 
         speed = np.sqrt(dx ** 2 + dy ** 2)
         acceleration = (speed - old_speed) / dt
+        old_speed = speed
         isDownwards = False
 
         radian = np.arctan2(dy, dx)
