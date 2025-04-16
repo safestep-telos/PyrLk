@@ -93,8 +93,10 @@ def calc_optical_flow():
         result_queue.put((frame, vectors)) # optical flow 계산 결과를 전달할 큐
 
         time_vector["vectors"] = vectors
-        data.append(time_vector)
-        vectors = []
+
+        if vectors:
+            data.append(time_vector)
+            vectors = []
 
 sub_thread = threading.Thread(target=calc_optical_flow)  # 스레드 생성
 sub_thread.start() # 서브 스레드 시작
