@@ -3,6 +3,7 @@ import cv2 as cv
 import sys
 import time
 
+
 video_path = "video.mp4" #humanVideo, people, testVideo, video, slide
 cap = cv.VideoCapture(video_path)
 
