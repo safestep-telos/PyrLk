@@ -1,6 +1,7 @@
 import numpy as np
 import cv2 as cv
 import sys
+import time
 
 video_path = "video.mp4" #humanVideo, people, testVideo, video, slide
 cap = cv.VideoCapture(video_path)
@@ -27,7 +28,7 @@ prev = None
 # 속도, 가속도, 아래로 이동했는지 여부
 vectors = list()
 old_speed = 0
-dt = 1 / cap.get(cv.CAP_PROP_FPS)
+old_time = 0
 
 while True:
     ret, frame = cap.read()
@@ -35,6 +36,10 @@ while True:
     if not ret:
             print('프레임 획득 실패')
             sys.exit()
+
+    new_time = time.time()
+    dt = new_time - old_time
+    old_time = new_time
 
     if prev is None:
         prev = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
