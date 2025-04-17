@@ -7,7 +7,7 @@ from collections import deque
 
 q = deque(maxlen=5)
 
-video_path = "fall.mp4" #humanVideo, people, testVideo, video, slide
+video_path = "slide.mp4" #humanVideo, people, testVideo, video, slide
 cap = cv.VideoCapture(video_path)
 
 # Parameters for lucas kanade optical flow
@@ -83,21 +83,11 @@ while True:
         if degree < -45 and degree > -135:
             isDownwards = True
 
-        if speed[int(d),int(c)] > 1 and speed[int(d),int(c)] < 20: #큰 모션이 있는 곳 빨간색
+        if speed[int(d),int(c)] > 2.2 and speed[int(d),int(c)] < 46: #큰 모션이 있는 곳 빨간색
             # cv.line(img, (x, y), (x+dx, y+dy), (0,0,255), 2)
             cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
 
-            vectors.append((speed,isDownwards, degree))
-        cnt = 0
-        for v in vectors:
-            if v[1] == True:
-                cnt += 1
-        
-        if cnt > 3:
-            q.append(idx)
-            
-        if len(q) == 5 and q[4]-q[0] == 4:
-            print("!!")
+            vectors.append((speed[int(d),int(c)],isDownwards, degree))
             
 
     cv.imshow('Optical flow', frame)
