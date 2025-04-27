@@ -8,11 +8,13 @@ import json
 """import mediapipe as mp
 
 mp_pose = mp.solutions.pose
-pose = mp_pose.Pose()"""
+pose = mp_pose.Pose()
+mp_drawing = mp.solutions.drawing_utils"""
 
-video_path = "slide.mp4" #humanVideo, people, testVideo, video, slide
+########### falltrue, falltrue2, fallfalse, fallfalse2  영상 사용시 45줄 코드 주석 확인!!! 
+video_path = "falltrue.mp4" #humanVideo, people, testVideo, video, slide, falltrue, falltrue2, falltrue3, fallfalse, fallfalse2, fallfalse3, fallfalse4
 cap = cv.VideoCapture(video_path)
-
+fps = cap.get(cv.CAP_PROP_FPS)
 # Parameters for lucas kanade optical flow
 lk_params = dict(winSize=(25, 25),
                  maxLevel=5,
@@ -23,14 +25,16 @@ lk_params = dict(winSize=(25, 25),
 #큐를 이용해 데이터 전달
 frame_queue = Queue()
 result_queue = Queue()
-fall_queue = deque(maxlen=3)
+fall_queue = deque()
+none_queue = deque()
 
 data = list()
 
 def calc_optical_flow():
+    total_calculation_time = 0.0    
     prev = None
     old_speed = 0
-    old_time = time.time()
+    dt = 1/fps
 
     vectors = list()
     vector = {}
@@ -39,6 +43,8 @@ def calc_optical_flow():
     while True :
         frame = frame_queue.get() #프레임 전달 받음
         if frame is None : break
+        
+        frame = frame[:, frame.shape[1]*4//7:, :] #falltrue, falltrue2, fallfalse, fallfalse2 사용하는 경우만 사용하는 코드
         
         points = list()
 
@@ -51,31 +57,33 @@ def calc_optical_flow():
             prev = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
             continue
         
-        """frame_rgb = cv.cvtColor(frame,cv.COLOR_BGR2RGB)
-        results = pose.process(frame_rgb)
-        shoulders = []
-        waists = []
-        if results.pose_landmarks:
-            landmark = results.pose_landmarks.landmark
+        """prev_rgb = cv.cvtColor(prev,cv.COLOR_BGR2RGB)
+        frame_rgb = cv.cvtColor(frame,cv.COLOR_BGR2RGB)
+        results_prev = pose.process(prev_rgb)
+        results_cur = pose.process(frame_rgb)    
+        heads_prev = []; heads_cur=[]
+        #waists = []
+        if results_prev.pose_landmarks and results_cur.pose_landmarks:
+            landmark_prev = results_prev.pose_landmarks.landmark
+            landmark_cur = results_cur.pose_landmarks.landmark
             
-            for i in [11,12]:
-                lm = landmark[i]
-                if lm.visibility > 0.5:
-                    shoulders.append(lm.y)
-               
-            for i in [23,24]:
-                lm = landmark[i]
-                if lm.visibility > 0.5:
-                    waists.append(lm.y)
+            for i in [2,5]:
+                lm_p = landmark_prev[i]
+                lm_c = landmark_cur[i]
+                if lm_p.visibility > 0.5:
+                    heads_prev.append(lm_p.y*frame.shape[0])
+                if lm_c.visibility > 0.5:
+                    heads_cur.append(lm_c.y*frame.shape[0])
                 
-        shoulders_y = None
+        heads_p_y = None
+        heads_c_y = None
         waists_y = None
         
-        if len(shoulders) > 0:
-            shoulders_y = sum(shoulders)/len(shoulders)
-        
-        if len(waists) > 0:
-            waists_y = sum(waists)/len(waists)    """  
+        if len(heads_prev) > 0 and len(heads_cur) > 0:
+            heads_p_y = sum(heads_prev)/len(heads_prev)
+            heads_c_y = sum(heads_cur)/len(heads_cur)
+            if np.abs(heads_p_y-heads_c_y) > 10:
+                print("fall detect2")"""
 
         new_time = time.time()
         #old_time = time.time()
@@ -106,59 +114,65 @@ def calc_optical_flow():
 
             speed = np.sqrt(dx ** 2 + dy ** 2)
             #acceleration = (speed - old_speed) / dt
-            old_speed = speed
+            #old_speed = speed
             radian = np.arctan2(dy, dx)
             degree = - np.degrees(radian)
             isDownwards = 0
 
             if degree < -45 and degree > -135:
                 isDownwards = 1
-            
-            """if shoulders_y != None and waists_y != None:
-                if np.abs(shoulders_y-waists_y) <= 1.5 and isDownwards:
-                    print("!!",new_time)
-                    cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)"""
 
-            if speed > 2.2 and speed < 46:  # 큰 모션이 있는 곳 빨간색
+            if speed > 2 and speed < 15:  # 큰 모션이 있는 곳 빨간색
                 
                 #vectors.append((speed,acceleration, isDownwards, degree))
 
-                vector = {"x": float(a), "y": float(b), "t": float(speed), "a": float(degree),
+                vector = {"x": float(c), "y": float(d), "dx": float(dx), "dy": float(dy), "t": float(speed), "a": float(degree),
                           "isdown": isDownwards}  # x좌표, y좌표, 속도, 각도, 아래 방향 여부
-                if isDownwards:
-                    cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
+                #if degree < -60 and degree > -120:
+                    #cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
                     #vectors.append(vector)
                 vectors.append(vector)
             
             """elif speed < 1:
                 cv.circle(frame, (int(c), int(d)),1, (0, 255, 0), -1)"""
-        down_count = sum(1 for v in vectors if v.get("isdown") == 1)
+        down_count = sum(1 for v in vectors if v.get("isdown") == 1 and v.get("t") > 4)
         if down_count > 10:
             fall_queue.append(1)
+            none_queue.clear()
         else:
-            if len(fall_queue) != 0:   
-                fall_queue.popleft()
+            if len(fall_queue) >= 6:
+                fall_queue.append(1)
+            none_queue.append(1)
+            #fall_queue.clear()
+
+        if len(none_queue) >= 2 and len(fall_queue) >= 6:
+            fall_queue.pop()
+            fall_queue.pop()           
+            print(len(fall_queue))
+            for k in range(1,len(fall_queue)+1):
+                data[len(data)-k-1]["fall"] = 1
+            fall_queue.clear()
+            #print(len(fall_queue))
         
         prev = curr
         #p0 = good_new.reshape(-1, 1, 2)
         result_queue.put((frame, vectors)) # optical flow 계산 결과를 전달할 큐
 
         time_vector["vectors"] = vectors
-        if len(fall_queue) == 3:
-            print("fall detect")    # 이 코드는 디버깅용, 주석 혹은 삭제 처리 예정
-            time_vector["fall"] = 1
-            data[len(data)-1]["fall"] = 1
-            data[len(data)-2]["fall"] = 1
+        if len(fall_queue) >= 6:
+            #print(len(fall_queue))
+            if len(none_queue) < 1:
+                print("fall detect",new_time)    # 이 코드는 디버깅용, 주석 혹은 삭제 처리 예정
 
         if vectors:
             data.append(time_vector)
             vectors = []
+            
 sub_thread = threading.Thread(target=calc_optical_flow)  # 스레드 생성
 sub_thread.start() # 서브 스레드 시작
 
 result_vectors_list = list() #프레임별 벡터값 저장
-
-while True:
+while True: 
     ret, frame = cap.read()
 
     if not ret:
@@ -172,7 +186,13 @@ while True:
         result = result_queue.get() # optical flow 계산 결과 받음
         result_frame = result[0]
         result_vectors = result[1]
-        result_vectors_list.append(result_vectors)
+        #result_vectors_list.append(result_vectors)
+        
+        for v in result_vectors:
+            c = v["x"]; d = v["y"]; a = v["dx"]+c; b=v["dy"]+d
+            ang = v["a"]
+            if ang < -60 and ang > -120:
+                cv.arrowedLine(result_frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
         cv.imshow('Optical flow', result_frame)
 
     # esc키를 누르면 종료
