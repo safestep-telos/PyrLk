@@ -5,14 +5,14 @@ from queue import Queue
 from collections import deque
 import time
 import json
-"""import mediapipe as mp
+import mediapipe as mp
 
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose()
-mp_drawing = mp.solutions.drawing_utils"""
+mp_drawing = mp.solutions.drawing_utils
 
 ########### falltrue, falltrue2, fallfalse, fallfalse2  영상 사용시 45줄 코드 주석 확인!!! 
-video_path = "falltrue.mp4" #humanVideo, people, testVideo, video, slide, falltrue, falltrue2, falltrue3, fallfalse, fallfalse2, fallfalse3, fallfalse4
+video_path = "fallfalse4.mp4" #humanVideo, people, testVideo, video, slide, falltrue, falltrue2, falltrue3, fallfalse, fallfalse2, fallfalse3, fallfalse4
 cap = cv.VideoCapture(video_path)
 fps = cap.get(cv.CAP_PROP_FPS)
 # Parameters for lucas kanade optical flow
@@ -57,6 +57,37 @@ def calc_optical_flow():
             prev = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
             continue
         
+        frame_rgb = cv.cvtColor(frame,cv.COLOR_BGR2RGB)
+        results = pose.process(frame_rgb)
+        new_x_min = None
+        new_y_min = None
+        new_x_max = None
+        new_y_max = None  
+        if results.pose_landmarks   :
+            x_min = min([lm.x for lm in results.pose_landmarks.landmark]) * frame.shape[1]
+            x_max = max([lm.x for lm in results.pose_landmarks.landmark]) * frame.shape[1]
+            y_min = min([lm.y for lm in results.pose_landmarks.landmark]) * frame.shape[0]
+            y_max = max([lm.y for lm in results.pose_landmarks.landmark]) * frame.shape[0]
+            
+            scale = 2
+            w = x_max - x_min
+            h = y_max - y_min
+            
+            x_center = (x_min + x_max) / 2
+            y_center = (y_min + y_max) / 2
+
+            new_w = w * scale
+            new_h = h * scale
+
+            new_x_min = int(max(x_center - new_w/2, 0))
+            new_y_min = int(max(y_center - new_h/2, 0))
+            new_x_max = int(min(x_center + new_w/2, frame.shape[1]))
+            new_y_max = int(min(y_center + new_h/2, frame.shape[0]))
+
+            # 확대된 박스
+            p3 = (new_x_min, new_y_min)
+            p4 = (new_x_max, new_y_max)
+            cv.rectangle(frame, p3, p4, (0, 0, 255), 2)  # 빨간색
         """prev_rgb = cv.cvtColor(prev,cv.COLOR_BGR2RGB)
         frame_rgb = cv.cvtColor(frame,cv.COLOR_BGR2RGB)
         results_prev = pose.process(prev_rgb)
@@ -123,29 +154,41 @@ def calc_optical_flow():
                 isDownwards = 1
 
             if speed > 2 and speed < 15:  # 큰 모션이 있는 곳 빨간색
-                
-                #vectors.append((speed,acceleration, isDownwards, degree))
+                if new_x_min is None and new_x_max is None and new_y_min is None and new_y_max is None:
+                    vector = {"x": float(c), "y": float(d), "dx": float(dx), "dy": float(dy), "t": float(speed), "a": float(degree),
+                          "isdown": isDownwards}  # x좌표, y좌표, 속도, 각도, 아래 방향 여부
+                    #if degree < -60 and degree > -120:
+                        #cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
+                        #vectors.append(vector)
+                    vectors.append(vector)
+                elif new_x_min<=c<=new_x_max and new_y_min<=d<=new_y_max:
+                    vector = {"x": float(c), "y": float(d), "dx": float(dx), "dy": float(dy), "t": float(speed), "a": float(degree),
+                          "isdown": isDownwards}  # x좌표, y좌표, 속도, 각도, 아래 방향 여부
+                    #if degree < -60 and degree > -120:
+                        #cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
+                        #vectors.append(vector)
+                    vectors.append(vector)
 
-                vector = {"x": float(c), "y": float(d), "dx": float(dx), "dy": float(dy), "t": float(speed), "a": float(degree),
+                """vector = {"x": float(c), "y": float(d), "dx": float(dx), "dy": float(dy), "t": float(speed), "a": float(degree),
                           "isdown": isDownwards}  # x좌표, y좌표, 속도, 각도, 아래 방향 여부
                 #if degree < -60 and degree > -120:
                     #cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
                     #vectors.append(vector)
-                vectors.append(vector)
+                vectors.append(vector)"""
             
             """elif speed < 1:
                 cv.circle(frame, (int(c), int(d)),1, (0, 255, 0), -1)"""
-        down_count = sum(1 for v in vectors if v.get("isdown") == 1 and v.get("t") > 4)
+        down_count = sum(1 for v in vectors if v.get("isdown") == 1 and v.get("t") >= 6)
         if down_count > 10:
             fall_queue.append(1)
             none_queue.clear()
         else:
-            if len(fall_queue) >= 6:
+            if len(fall_queue) >= 3:
                 fall_queue.append(1)
             none_queue.append(1)
             #fall_queue.clear()
 
-        if len(none_queue) >= 2 and len(fall_queue) >= 6:
+        if len(none_queue) >= 2 and len(fall_queue) >= 3:
             fall_queue.pop()
             fall_queue.pop()           
             print(len(fall_queue))
@@ -159,7 +202,7 @@ def calc_optical_flow():
         result_queue.put((frame, vectors)) # optical flow 계산 결과를 전달할 큐
 
         time_vector["vectors"] = vectors
-        if len(fall_queue) >= 6:
+        if len(fall_queue) >= 3:
             #print(len(fall_queue))
             if len(none_queue) < 1:
                 print("fall detect",new_time)    # 이 코드는 디버깅용, 주석 혹은 삭제 처리 예정
