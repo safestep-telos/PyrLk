@@ -9,12 +9,12 @@ import mediapipe as mp
 
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose()
-mp_drawing = mp.solutions.drawing_utils
 
 ########### falltrue, falltrue2, fallfalse, fallfalse2  영상 사용시 45줄 코드 주석 확인!!! 
-video_path = "fallfalse4.mp4" #humanVideo, people, testVideo, video, slide, falltrue, falltrue2, falltrue3, fallfalse, fallfalse2, fallfalse3, fallfalse4
+video_path = "falltrue3.mp4" #humanVideo, people, testVideo, video, slide, falltrue, falltrue2, falltrue3, fallfalse, fallfalse2, fallfalse3, fallfalse4
 cap = cv.VideoCapture(video_path)
 fps = cap.get(cv.CAP_PROP_FPS)
+
 # Parameters for lucas kanade optical flow
 lk_params = dict(winSize=(25, 25),
                  maxLevel=5,
@@ -31,10 +31,10 @@ none_queue = deque()
 data = list()
 
 def calc_optical_flow():
-    total_calculation_time = 0.0    
+    #total_calculation_time = 0.0    
     prev = None
-    old_speed = 0
-    dt = 1/fps
+    #old_speed = 0
+    #dt = 1/fps
 
     vectors = list()
     vector = {}
