@@ -25,7 +25,7 @@ for file_name in os.listdir(data_file):
 
     #data.json의 프레임별 데이터를 x에 넣기
     for frame in data1:
-        x.append(frame["frames"])
+        x.append(frame["frames"][0]["features"])
 
         #0,1 구분해서 y에 넣기
         index = frame["frames"][0]["frame_index"]
