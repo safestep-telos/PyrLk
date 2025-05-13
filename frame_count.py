@@ -12,7 +12,7 @@ pose = mp_pose.Pose()
 mp_drawing = mp.solutions.drawing_utils
 
 ########### falltrue, falltrue2, fallfalse, fallfalse2  영상 사용시 45줄 코드 주석 확인!!!
-video_path = "falltrue.mp4"  # humanVideo, people, testVideo, video, slide, falltrue, falltrue2, falltrue3, fallfalse, fallfalse2, fallfalse3, fallfalse4
+video_path = "falltrue3.mp4"  # humanVideo, people, testVideo, video, slide, falltrue, falltrue2, falltrue3, fallfalse, fallfalse2, fallfalse3, fallfalse4
 cap = cv.VideoCapture(video_path)
 fps = cap.get(cv.CAP_PROP_FPS)
 
@@ -128,15 +128,20 @@ def calc_optical_flow():
                     vector = {"x": float(c), "y": float(d), "t": float(speed),
                               "a": float(degree),
                               "isdown": isDownwards}  # x좌표, y좌표, 속도, 각도, 아래 방향 여부
+                    if degree < -60 and degree > -120 and speed >= 6:
+                        cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
+                        vectors.append(vector)
+                    #vectors.append(vector)
 
-                    vectors.append(vector)
                 elif new_x_min <= c <= new_x_max and new_y_min <= d <= new_y_max:
                     #mediapipep pose가 감지되었을 때: 사람의 중심 영역 안에서만 추적
                     vector = {"x": float(c), "y": float(d), "t": float(speed),
                               "a": float(degree),
                               "isdown": isDownwards}  # x좌표, y좌표, 속도, 각도, 아래 방향 여부
-
-                    vectors.append(vector)
+                    if degree < -60 and degree > -120 and speed >= 6:
+                        cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
+                        vectors.append(vector)
+                    #vectors.append(vector)
 
         down_count = sum(1 for v in vectors if v.get("isdown") == 1 and v.get("t") >= 6)
         if down_count > 10:
