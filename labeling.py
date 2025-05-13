@@ -29,7 +29,6 @@ for file_name in os.listdir(data_file):
 
         #0,1 구분해서 y에 넣기
         index = frame["frames"][0]["frame_index"]
-
         if index >= fall_start and index <= fall_end:
             frame["frames"][0]["fall"] = 1
             y.append(1)
