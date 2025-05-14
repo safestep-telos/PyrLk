@@ -43,6 +43,7 @@ class OpticalFlowExtractor:
                 break
 
             frame, frame_idx = frame_info
+            #print(frame_idx)
             frame = cv.resize(frame, (640, 360))
             height, width = frame.shape[:2]
 
@@ -73,6 +74,20 @@ class OpticalFlowExtractor:
 
             if not roi_points:
                 prev = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+                self.data.append({
+                    "time": time.time(),
+                    "frame_index": frame_idx,
+                    "fall": 0,
+                    "features": {
+                        "vec_num": 0.0,
+                        "down_ratio":  0.0,
+                        "speed_mean": 0.0,
+                        "speed_std": 0.0,
+                        "angle_mean": 0.0,
+                        "angle_std": 0.0,
+                        "fastdown_num": 0.0
+                    }
+                })
                 continue
 
             p0 = np.array(roi_points, dtype=np.float32).reshape(-1, 1, 2)
@@ -92,7 +107,7 @@ class OpticalFlowExtractor:
                     isDownwards = int(-135 < degree < -45)
                     if 1 <= speed <= 15:
                         vectors.append({"x": c, "y": d, "dx": dx, "dy": dy, "t": speed, "a": degree, "isdown": isDownwards})
-                        cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
+                        #cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
 
             if vectors:
                 speeds = [v["t"] for v in vectors]
@@ -114,11 +129,27 @@ class OpticalFlowExtractor:
                         "fastdown_num": float(len(fastdowns))
                     }
                 })
+            else:
+                self.data.append({
+                    "time": time.time(),
+                    "frame_index": frame_idx,
+                    "fall": 0,
+                    "features": {
+                        "vec_num": 0.0,
+                        "down_ratio":  0.0,
+                        "speed_mean": 0.0,
+                        "speed_std": 0.0,
+                        "angle_mean": 0.0,
+                        "angle_std": 0.0,
+                        "fastdown_num": 0.0
+                    }
+                })
+                
 
             prev = curr
-            self.result_queue.put((frame, vectors))
+            #self.result_queue.put((frame, vectors))
 
-        print(f"[INFO] Runtime {self.runtime:.2f} 처리 완료. 실행시간: {time.time() - start_time:.2f}초")
+        print(f"[INFO] Runtime {self.runtime:.2f} 처리 완료. 실행시간: {time.time() - start_time:.2f}초 프레임수 : {self.frame_cnt}")
 
     def run(self):
         thread = threading.Thread(target=self.calc_optical_flow)
@@ -128,12 +159,12 @@ class OpticalFlowExtractor:
             if not ret:
                 self.frame_queue.put(None)
                 break
-            self.frame_queue.put((frame, self.frame_idx))
             self.frame_idx += 1
+            self.frame_queue.put((frame, self.frame_idx))
 
-            if not self.result_queue.empty():
+            """if not self.result_queue.empty():
                 result_frame, _ = self.result_queue.get()
-                """cv.imshow("Optical Flow", result_frame)
+                cv.imshow("Optical Flow", result_frame)
 
             if cv.waitKey(1) & 0xFF == 27:
                 self.frame_queue.put(None)
@@ -145,20 +176,27 @@ class OpticalFlowExtractor:
 
 root_path = r"D:\041.낙상사고 위험동작 영상-센서 쌍 데이터\3.개방데이터\1.데이터\Validation\01.원천데이터\VS\영상"
 all_videos = glob.glob(os.path.join(root_path, "**", "*.mp4"), recursive=True)
-
+print(len(all_videos))
+part_index = 0
 merged_data = []
 if len(all_videos) == 0:
     print("!!")
 for i, video in enumerate(all_videos):
-    print(video)
+    print(i+1,os.path.basename(video))
     vid_id = i + 1
     extractor = OpticalFlowExtractor(video)
     extractor.run()
     merged_data.append({
         "vid_id": vid_id,
-        "vid_name": video,
+        "vid_name": os.path.basename(video),
         "frames": extractor.data
     })
+    if (i + 1) % 1000 == 0 or (i + 1) == len(all_videos):
+        part_index += 1
+        filename = f"data_part{part_index}.json"
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(merged_data, f, ensure_ascii=False, indent=4, default=lambda o: float(o) if isinstance(o, (np.floating, np.integer)) else str(o))
+        merged_data = []
 
-with open("data.json", "w", encoding="utf-8") as f:
-    json.dump(merged_data, f, ensure_ascii=False, indent=4, default=lambda o: float(o) if isinstance(o, (np.floating, np.integer)) else str(o))
+"""with open("data.json", "w", encoding="utf-8") as f:
+    json.dump(merged_data, f, ensure_ascii=False, indent=4, default=lambda o: float(o) if isinstance(o, (np.floating, np.integer)) else str(o))"""
