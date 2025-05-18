@@ -55,6 +55,20 @@ class OpticalFlowExtractor:
 
             if prev is None:
                 prev = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+                self.data.append({
+                    "time": time.time(),
+                    "frame_index": frame_idx,
+                    "fall": 0,
+                    "features": {
+                        "vec_num": 0.0,
+                        "down_ratio":  0.0,
+                        "speed_mean": 0.0,
+                        "speed_std": 0.0,
+                        "angle_mean": 0.0,
+                        "angle_std": 0.0,
+                        "fastdown_num": 0.0
+                    }
+                })
                 continue
 
             if frame_idx % 3 == 1:
