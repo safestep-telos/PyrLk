@@ -26,7 +26,6 @@ for i,video in enumerate(data1):
 
     fall_start = data2["sensordata"]["fall_start_frame"]
     fall_end = data2["sensordata"]["fall_end_frame"]
-    #vecs = []
     #data.json의 프레임별 데이터를 x에 넣기
     for i,frame in enumerate(video["frames"]):
         if i == 600:
@@ -43,7 +42,7 @@ for i,video in enumerate(data1):
         ]
         if all(v == 0.0 for v in vec):
             continue
-        X.append(vec)
+        
         
         index = frame["frame_index"]
         if fall_start <= index <= fall_end:
