@@ -88,7 +88,7 @@ def load_sequences_from_json(data_json_path, label_root_path, max_frames=600):
 
     return np.array(X_seq), np.array(y_seq)
 root_path = r"D:\041.낙상사고 위험동작 영상-센서 쌍 데이터\3.개방데이터\1.데이터\Validation\02.라벨링데이터\VL\영상"
-X_seq,y_seq = load_sequences_from_json("data.json")
+X_seq,y_seq = load_sequences_from_json("data.json",root_path)
 # 4. 윈도우 생성 + train/test 분할
 window_size = 15
 X_win, y_win = create_sliding_windows(X_seq, y_seq, window_size)
