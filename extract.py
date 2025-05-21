@@ -25,6 +25,7 @@ class OpticalFlowExtractor:
         )
 
         self.pose = mp_pose.Pose(static_image_mode=False, model_complexity=0)
+        self.pose_next_try = 0
         self.frame_queue = Queue()
         self.data = []
         self.frame_idx = 0
@@ -61,15 +62,17 @@ class OpticalFlowExtractor:
                 self.data.append(self.empty_feature(frame_idx))
                 continue
 
-            landmarks = self.get_pose_landmarks(frame)
-            if landmarks and len(landmarks) >= 33:
-                self.pose_landmarks = [(int(x * width), int(y * height)) for x, y in landmarks]
-                self.prev_landmarks.append(self.pose_landmarks)
-                if len(self.prev_landmarks) > 3:
-                    self.prev_landmarks.pop(0)
-            else:
-                self.prev_landmarks = []
-                self.pose_landmarks = None
+            # 2프레임마다 포즈 검출 
+            if frame_idx >= self.pose_next_try:
+                landmarks = self.get_pose_landmarks(frame)
+                if landmarks and len(landmarks) >= 33:
+                    self.pose_landmarks = [(int(x * width), int(y * height)) for x, y in landmarks]
+                    self.prev_landmarks.append(self.pose_landmarks)
+                    if len(self.prev_landmarks) > 3:
+                        self.prev_landmarks.pop(0)
+                    self.pose_next_try = frame_idx + 2  # 성공 → 다음 2프레임 뒤 시도
+                else:
+                    self.pose_next_try = frame_idx + 1
 
             roi_points = []
             if self.pose_landmarks:
@@ -149,8 +152,8 @@ class OpticalFlowExtractor:
             feature["delta_down_ratio"] = feature["down_ratio"] - prev_f["down_ratio"]
             feature["delta_fastdown_num"] = feature["fastdown_num"] - prev_f["fastdown_num"]
 
-        if len(self.prev_landmarks) == 3:
-            p0, p1, p2 = [np.array(lms) for lms in self.prev_landmarks]
+        if len(self.prev_landmarks) >= 3:
+            p0, p1, p2 = [np.array(lms) for lms in self.prev_landmarks[-3:]]
             for name, idx in [("hip_accel", 23), ("shoulder_accel", 11), ("head_accel", 0)]:
                 if np.all(p0[idx]) and np.all(p1[idx]) and np.all(p2[idx]):
                     accel = np.linalg.norm(p0[idx] - 2 * p1[idx] + p2[idx])
