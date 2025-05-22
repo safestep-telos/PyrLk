@@ -6,9 +6,7 @@ import time
 import os
 import glob
 import json
-import mediapipe as mp
-
-mp_pose = mp.solutions.pose
+from ultralytics import YOLO  # YOLOv8n 포즈
 
 class OpticalFlowExtractor:
     def __init__(self, video_path):
@@ -24,7 +22,7 @@ class OpticalFlowExtractor:
             criteria=(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 10, 0.03)
         )
 
-        self.pose = mp_pose.Pose(static_image_mode=False, model_complexity=0)
+        self.pose_model = YOLO("yolov8n-pose.pt")  # 경량화된 YOLOv8n-pose 사용
         self.pose_next_try = 0
         self.frame_queue = Queue()
         self.data = []
@@ -33,11 +31,10 @@ class OpticalFlowExtractor:
         self.prev_landmarks = []
 
     def get_pose_landmarks(self, frame):
-        rgb = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
-        results = self.pose.process(rgb)
-        if results.pose_landmarks:
-            landmarks = results.pose_landmarks.landmark
-            return [(lm.x, lm.y) for lm in landmarks]
+        results = self.pose_model.predict(source=frame, conf=0.4, verbose=False)[0]
+        for keypoints in results.keypoints.xy:
+            if len(keypoints) >= 33:
+                return [(int(x), int(y)) for x, y in keypoints.cpu().numpy()]
         return None
 
     def calc_optical_flow(self):
@@ -62,15 +59,14 @@ class OpticalFlowExtractor:
                 self.data.append(self.empty_feature(frame_idx))
                 continue
 
-            # 2프레임마다 포즈 검출 
             if frame_idx >= self.pose_next_try:
                 landmarks = self.get_pose_landmarks(frame)
-                if landmarks and len(landmarks) >= 33:
-                    self.pose_landmarks = [(int(x * width), int(y * height)) for x, y in landmarks]
-                    self.prev_landmarks.append(self.pose_landmarks)
+                if landmarks:
+                    self.pose_landmarks = landmarks
+                    self.prev_landmarks.append(landmarks)
                     if len(self.prev_landmarks) > 3:
                         self.prev_landmarks.pop(0)
-                    self.pose_next_try = frame_idx + 2  # 성공 -> 다음 2프레임 뒤 시도
+                    self.pose_next_try = frame_idx + 2
                 else:
                     self.pose_next_try = frame_idx + 1
 
@@ -110,7 +106,6 @@ class OpticalFlowExtractor:
             self.data.append(self.extract_features(frame_idx, vectors))
             prev = curr
 
-        print(f"[INFO] Runtime {self.runtime:.2f} 처리 완료. 실행시간: {time.time() - start_time:.2f}초 프레임수 : {self.frame_cnt}")
 
     def empty_feature(self, frame_idx):
         keys = ["vec_num", "down_ratio", "speed_mean", "speed_std", "angle_std", "fastdown_num",
@@ -189,13 +184,12 @@ if __name__ == "__main__":
     merged_data = []
 
     for i, video in enumerate(all_videos):
-        print(f"[{i+1}/{len(all_videos)}] Processing: {os.path.basename(video)}")
+        print(f"[{i+1}/{len(all_videos)}]")
         vid_id = i + 1
         start_time = time.time()
         extractor = OpticalFlowExtractor(video)
         extractor.run()
         elapsed = time.time() - start_time
-        print(f"--> Done: {os.path.basename(video)} in {elapsed:.2f} seconds")
 
         merged_data.append({
             "vid_id": vid_id,
