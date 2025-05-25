@@ -8,12 +8,12 @@ import json
 import os
 
 class FallTransformer(nn.Module):
-    def __init__(self, feature_dim=7, seq_len=15, d_model=64, nhead=4, num_layers=2):
+    def __init__(self, feature_dim=12, seq_len=15, d_model=64, nhead=4, num_layers=2):
         super(FallTransformer, self).__init__()
         self.embedding = nn.Linear(feature_dim, d_model)
         self.pos_embed = nn.Parameter(torch.randn(1, seq_len, d_model))
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dropout=0.0, batch_first=True)
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.classifier = nn.Linear(d_model, 1)
 
@@ -50,11 +50,11 @@ def load_sequences_from_json(data_json_path, label_root_path, max_frames=600):
             if label_name in files:
                 label_path = os.path.join(root, label_name)
                 break
-        print(i+1,os.path.join(root_path,label_path))
         if label_path is None:
             continue
-
+        
         with open(label_path, "r", encoding="utf-8") as f:
+            print(i+1,os.path.join(root_path,label_path))
             data2 = json.load(f)
 
         fall_start = data2["sensordata"]["fall_start_frame"]
@@ -69,9 +69,14 @@ def load_sequences_from_json(data_json_path, label_root_path, max_frames=600):
                 feature_dict["down_ratio"],
                 feature_dict["speed_mean"],
                 feature_dict["speed_std"],
-                feature_dict["angle_mean"],
                 feature_dict["angle_std"],
-                feature_dict["fastdown_num"]
+                feature_dict["fastdown_num"],
+                feature_dict["delta_vec_num"],
+                feature_dict["delta_down_ratio"],
+                feature_dict["delta_fastdown_num"],
+                feature_dict["hip_accel"],
+                feature_dict["shoulder_accel"],
+                feature_dict["head_accel"]
             ]
             if all(v == 0.0 for v in vec):
                 continue
@@ -92,9 +97,9 @@ batch_size = 128
 train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size)
 
-model = FallTransformer(feature_dim=7, seq_len=window_size)
+model = FallTransformer(feature_dim=12, seq_len=window_size)
 criterion = nn.BCELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 model.train()
 for epoch in range(10):
