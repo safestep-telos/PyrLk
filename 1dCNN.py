@@ -72,9 +72,14 @@ def load_sequences_from_json(data_json_path, label_root_path, max_frames=600):
                 feature_dict["down_ratio"],
                 feature_dict["speed_mean"],
                 feature_dict["speed_std"],
-                feature_dict["angle_mean"],
                 feature_dict["angle_std"],
-                feature_dict["fastdown_num"]
+                feature_dict["fastdown_num"],
+                feature_dict["delta_vec_num"],
+                feature_dict["delta_down_ratio"],
+                feature_dict["delta_fastdown_num"],
+                feature_dict["hip_accel"],
+                feature_dict["shoulder_accel"],
+                feature_dict["head_accel"],
             ]
 
             # 모든 값이 0이면 의미 없는 프레임 → 제외
@@ -118,4 +123,4 @@ with torch.no_grad():
     y_pred_bin = (y_pred > 0.5).int().numpy()
     y_true = y_test.int().numpy()
     f2 = fbeta_score(y_true, y_pred_bin, beta=2)
-    print(f"\n✅ F2 Score: {f2:.4f}")
+    print(f"\n F2 Score: {f2:.4f}")
