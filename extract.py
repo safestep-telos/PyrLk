@@ -8,7 +8,7 @@ import glob
 import json
 import mediapipe as mp
 
-pose_model = mp.solutions.pose.Pose(static_image_mode=False, model_complexity=0)
+mp_pose = mp.solutions.pose
 
 class OpticalFlowExtractor:
     def __init__(self, video_path):
@@ -24,12 +24,11 @@ class OpticalFlowExtractor:
             criteria=(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 10, 0.03)
         )
 
-        self.pose = pose_model
+        self.pose = mp_pose.Pose(static_image_mode=False, model_complexity=0)
         self.pose_next_try = 0
         self.frame_queue = Queue()
-        self.result_queue = Queue()
         self.data = []
-        self.frame_idx = 1
+        self.frame_idx = 0
         self.pose_landmarks = None
         self.prev_landmarks = []
 
@@ -67,7 +66,7 @@ class OpticalFlowExtractor:
             if frame_idx >= self.pose_next_try:
                 landmarks = self.get_pose_landmarks(frame)
                 if landmarks and len(landmarks) >= 33:
-                    self.pose_landmarks = [(float(x * width), float(y * height)) for x, y in landmarks]
+                    self.pose_landmarks = [(int(x * width), int(y * height)) for x, y in landmarks]
                     self.prev_landmarks.append(self.pose_landmarks)
                     if len(self.prev_landmarks) > 3:
                         self.prev_landmarks.pop(0)
@@ -107,11 +106,9 @@ class OpticalFlowExtractor:
                     isDownwards = int(-135 < degree < -45)
                     if 1 <= speed <= 15:
                         vectors.append({"x": c, "y": d, "dx": dx, "dy": dy, "t": speed, "a": degree, "isdown": isDownwards})
-                        #cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
 
             self.data.append(self.extract_features(frame_idx, vectors))
             prev = curr
-            self.result_queue.put((frame, vectors))
 
         print(f"[INFO] Runtime {self.runtime:.2f} 처리 완료. 실행시간: {time.time() - start_time:.2f}초 프레임수 : {self.frame_cnt}")
 
@@ -179,14 +176,6 @@ class OpticalFlowExtractor:
                 break
             self.frame_idx += 1
             self.frame_queue.put((frame, self.frame_idx))
-            
-            """if not self.result_queue.empty():
-                result_frame, _ = self.result_queue.get()
-                cv.imshow("Optical Flow", result_frame)
-
-            if cv.waitKey(1) & 0xFF == 27:
-                self.frame_queue.put(None)
-                break"""
 
         thread.join()
         self.cap.release()
@@ -200,11 +189,13 @@ if __name__ == "__main__":
     merged_data = []
 
     for i, video in enumerate(all_videos):
-        print(f"[{i+1}/{len(all_videos)}] {os.path.basename(video)}")
+        print(f"[{i+1}/{len(all_videos)}] Processing: {os.path.basename(video)}")
         vid_id = i + 1
         start_time = time.time()
         extractor = OpticalFlowExtractor(video)
         extractor.run()
+        elapsed = time.time() - start_time
+        print(f"--> Done: {os.path.basename(video)} in {elapsed:.2f} seconds")
 
         merged_data.append({
             "vid_id": vid_id,

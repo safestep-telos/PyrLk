@@ -36,19 +36,14 @@ for i,video in enumerate(data1):
             feature_dict["down_ratio"],
             feature_dict["speed_mean"],
             feature_dict["speed_std"],
+            feature_dict["angle_mean"],
             feature_dict["angle_std"],
-            feature_dict["fastdown_num"],
-            feature_dict["delta_vec_num"],
-            feature_dict["delta_down_ratio"],
-            feature_dict["delta_fastdown_num"],
-            feature_dict["hip_accel"],
-            feature_dict["shoulder_accel"],
-            feature_dict["head_accel"]
+            feature_dict["fastdown_num"]
         ]
         if all(v == 0.0 for v in vec):
             continue
         
-        X.append(vec)
+        
         index = frame["frame_index"]
         if fall_start <= index <= fall_end:
             y.append(1)
