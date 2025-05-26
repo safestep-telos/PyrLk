@@ -6,9 +6,10 @@ from sklearn.model_selection import train_test_split
 import numpy as np
 import json
 import os
+from sklearn.preprocessing import StandardScaler
 
 class FallTransformer(nn.Module):
-    def __init__(self, feature_dim=7, seq_len=15, d_model=64, nhead=4, num_layers=2):
+    def __init__(self, feature_dim=12, seq_len=15, d_model=64, nhead=4, num_layers=2):
         super(FallTransformer, self).__init__()
         self.embedding = nn.Linear(feature_dim, d_model)
         self.pos_embed = nn.Parameter(torch.randn(1, seq_len, d_model))
@@ -21,7 +22,7 @@ class FallTransformer(nn.Module):
         x = self.embedding(x) + self.pos_embed[:, :x.size(1), :]
         x = self.encoder(x)  # [B, 15, d_model]
         x = x[:, x.size(1) // 2, :]  # 중심 프레임 추출
-        return torch.sigmoid(self.classifier(x)).squeeze()
+        return self.classifier(x).squeeze()
 
 def create_sliding_windows(X_seq, y_seq, window_size=15):
     X_win = []
@@ -36,7 +37,7 @@ def create_sliding_windows(X_seq, y_seq, window_size=15):
     y_np = np.array(y_win)
     return torch.from_numpy(X_np).float(), torch.from_numpy(y_np).float()
 
-def load_sequences_from_json(data_json_path, label_root_path, max_frames=600):
+"""def load_sequences_from_json(data_json_path, label_root_path, max_frames=600):
     with open(data_json_path, "r", encoding="utf-8") as f:
         data1 = json.load(f)
 
@@ -69,9 +70,14 @@ def load_sequences_from_json(data_json_path, label_root_path, max_frames=600):
                 feature_dict["down_ratio"],
                 feature_dict["speed_mean"],
                 feature_dict["speed_std"],
-                feature_dict["angle_mean"],
                 feature_dict["angle_std"],
-                feature_dict["fastdown_num"]
+                feature_dict["fastdown_num"],
+                feature_dict["delta_vec_num"],
+                feature_dict["delta_down_ratio"],
+                feature_dict["delta_fastdown_num"],
+                feature_dict["hip_accel"],
+                feature_dict["shoulder_accel"],
+                feature_dict["head_accel"],
             ]
             if all(v == 0.0 for v in vec):
                 continue
@@ -79,10 +85,13 @@ def load_sequences_from_json(data_json_path, label_root_path, max_frames=600):
             index = frame["frame_index"]
             y_seq.append(1 if fall_start <= index <= fall_end else 0)
 
-    return np.array(X_seq), np.array(y_seq)
+    return np.array(X_seq), np.array(y_seq)"""
 
-root_path = r"D:\041.낙상사고 위험동작 영상-센서 쌍 데이터\3.개방데이터\1.데이터\Validation\02.라벨링데이터\VL\영상"
-X_seq, y_seq = load_sequences_from_json("data.json", root_path)
+root_path = r"/content/drive/MyDrive/영상"
+X_seq = np.load(r"/content/drive/MyDrive/X_seq.npy")
+y_seq = np.load(r"/content/drive/MyDrive/y_seq.npy")
+scaler = StandardScaler()
+X_seq = scaler.fit_transform(X_seq)
 window_size = 15
 X_win, y_win = create_sliding_windows(X_seq, y_seq, window_size)
 
@@ -91,33 +100,96 @@ X_train, X_test, y_train, y_test = train_test_split(X_win, y_win, stratify=y_win
 batch_size = 128
 train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size)
-
-model = FallTransformer(feature_dim=7, seq_len=window_size)
-criterion = nn.BCELoss()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = FallTransformer(feature_dim=12, seq_len=window_size).to(device)
+criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([3.0]).to(device))
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
+best_f2 = 0.0
+patience = 5
+wait = 0
+
+print("Using device:", device)
 model.train()
-for epoch in range(10):
+for epoch in range(50):  # 늘어난 세대 수
+    model.train()
     total_loss = 0
+    num_batches = 0
     for xb, yb in train_loader:
+        xb, yb = xb.to(device), yb.to(device)
         optimizer.zero_grad()
         outputs = model(xb)
         loss = criterion(outputs, yb)
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
-    print(f"Epoch {epoch+1}, Loss: {total_loss:.4f}")
+        num_batches += 1
+
+    # Validation
+    model.eval()
+    y_pred_all, y_true_all = [], []
+    with torch.no_grad():
+        for xb, yb in test_loader:
+            xb, yb = xb.to(device), yb.to(device)
+            outputs = model(xb)
+            preds = (outputs > 0.5).int().cpu().numpy()
+            y_pred_all.extend(preds)
+            y_true_all.extend(yb.int().cpu().numpy())
+    avg_loss = total_loss/num_batches
+    f2 = fbeta_score(y_true_all, y_pred_all, beta=2)
+    print(f"Epoch {epoch+1}, Loss: {avg_loss:.4f}, F2: {f2:.4f}")
+
+    # Early stopping
+    if f2 > best_f2:
+        best_f2 = f2
+        wait = 0
+        torch.save(model.state_dict(), "best_model.pt")
+        print(" New best model saved.")
+    else:
+        wait += 1
+        if wait >= patience:
+            print(f"Early stopping triggered at epoch {epoch+1}")
+            break
+
+model.load_state_dict(torch.load("best_model.pt"))
+model.eval()
+y_pred_all, y_true_all = [], []
+
+with torch.no_grad():
+    for xb, yb in test_loader:
+        xb, yb = xb.to(device), yb.to(device)
+        outputs = model(xb)
+        preds = (outputs > 0.5).int().cpu().numpy()
+        y_pred_all.extend(preds)
+        y_true_all.extend(yb.int().cpu().numpy())
+
+f2 = fbeta_score(y_true_all, y_pred_all, beta=2)
+print(f"\n F2 Score: {f2:.4f}")
+"""for epoch in range(50):
+    total_loss = 0
+    num_batches = 0
+    for xb, yb in train_loader:
+        xb, yb = xb.to(device), yb.to(device)
+        optimizer.zero_grad()
+        outputs = model(xb)
+        loss = criterion(outputs, yb)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+        num_batches += 1
+    avg_loss = total_loss/num_batches  
+    print(f"Epoch {epoch+1}, Loss: {avg_loss:.4f}")
 
 model.eval()
 y_pred_all, y_true_all = [], []
 
 with torch.no_grad():
     for xb, yb in test_loader:
+        xb, yb = xb.to(device), yb.to(device)
         outputs = model(xb)
-        preds = (outputs > 0.5).int().numpy()
+        preds = (outputs > 0.5).int().cpu().numpy()
         y_pred_all.extend(preds)
-        y_true_all.extend(yb.int().numpy())
+        y_true_all.extend(yb.int().cpu().numpy())
 
 f2 = fbeta_score(y_true_all, y_pred_all, beta=2)
-print(f"\n F2 Score: {f2:.4f}")
-
+print(f"\n F2 Score: {f2:.4f}")"""
