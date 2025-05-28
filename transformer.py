@@ -37,56 +37,6 @@ def create_sliding_windows(X_seq, y_seq, window_size=15):
     y_np = np.array(y_win)
     return torch.from_numpy(X_np).float(), torch.from_numpy(y_np).float()
 
-"""def load_sequences_from_json(data_json_path, label_root_path, max_frames=600):
-    with open(data_json_path, "r", encoding="utf-8") as f:
-        data1 = json.load(f)
-
-    X_seq = []
-    y_seq = []
-
-    for i,video in enumerate(data1):
-        label_name = video["vid_name"].replace(".mp4", ".json")
-        label_path = None
-        for root, dirs, files in os.walk(label_root_path):
-            if label_name in files:
-                label_path = os.path.join(root, label_name)
-                break
-        print(i+1,os.path.join(root_path,label_path))
-        if label_path is None:
-            continue
-
-        with open(label_path, "r", encoding="utf-8") as f:
-            data2 = json.load(f)
-
-        fall_start = data2["sensordata"]["fall_start_frame"]
-        fall_end = data2["sensordata"]["fall_end_frame"]
-
-        for j, frame in enumerate(video["frames"]):
-            if j >= max_frames:
-                break
-            feature_dict = frame["features"]
-            vec = [
-                feature_dict["vec_num"],
-                feature_dict["down_ratio"],
-                feature_dict["speed_mean"],
-                feature_dict["speed_std"],
-                feature_dict["angle_std"],
-                feature_dict["fastdown_num"],
-                feature_dict["delta_vec_num"],
-                feature_dict["delta_down_ratio"],
-                feature_dict["delta_fastdown_num"],
-                feature_dict["hip_accel"],
-                feature_dict["shoulder_accel"],
-                feature_dict["head_accel"],
-            ]
-            if all(v == 0.0 for v in vec):
-                continue
-            X_seq.append(vec)
-            index = frame["frame_index"]
-            y_seq.append(1 if fall_start <= index <= fall_end else 0)
-
-    return np.array(X_seq), np.array(y_seq)"""
-
 root_path = r"/content/drive/MyDrive/영상"
 X_seq = np.load(r"/content/drive/MyDrive/X_seq.npy")
 y_seq = np.load(r"/content/drive/MyDrive/y_seq.npy")
@@ -103,7 +53,7 @@ test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = FallTransformer(feature_dim=12, seq_len=window_size).to(device)
 criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([3.0]).to(device))
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
 
 best_f2 = 0.0
 patience = 5
@@ -165,31 +115,3 @@ with torch.no_grad():
 
 f2 = fbeta_score(y_true_all, y_pred_all, beta=2)
 print(f"\n F2 Score: {f2:.4f}")
-"""for epoch in range(50):
-    total_loss = 0
-    num_batches = 0
-    for xb, yb in train_loader:
-        xb, yb = xb.to(device), yb.to(device)
-        optimizer.zero_grad()
-        outputs = model(xb)
-        loss = criterion(outputs, yb)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-        num_batches += 1
-    avg_loss = total_loss/num_batches  
-    print(f"Epoch {epoch+1}, Loss: {avg_loss:.4f}")
-
-model.eval()
-y_pred_all, y_true_all = [], []
-
-with torch.no_grad():
-    for xb, yb in test_loader:
-        xb, yb = xb.to(device), yb.to(device)
-        outputs = model(xb)
-        preds = (outputs > 0.5).int().cpu().numpy()
-        y_pred_all.extend(preds)
-        y_true_all.extend(yb.int().cpu().numpy())
-
-f2 = fbeta_score(y_true_all, y_pred_all, beta=2)
-print(f"\n F2 Score: {f2:.4f}")"""
