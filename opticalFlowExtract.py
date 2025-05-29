@@ -121,7 +121,7 @@ class OpticalFlowExtractor:
                     isDownwards = int(-135 < degree < -45)
                     if 1 <= speed <= 15:
                         vectors.append({"x": c, "y": d, "dx": dx, "dy": dy, "t": speed, "a": degree, "isdown": isDownwards})
-                        #cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
+                        cv.arrowedLine(frame, (int(c), int(d)), (int(a), int(b)), (0, 0, 255), 2, tipLength=0.3)
 
             if vectors:
                 speeds = [v["t"] for v in vectors]
@@ -161,7 +161,7 @@ class OpticalFlowExtractor:
                 
 
             prev = curr
-            #self.result_queue.put((frame, vectors))
+            self.result_queue.put((frame, vectors))
 
         print(f"[INFO] Runtime {self.runtime:.2f} 처리 완료. 실행시간: {time.time() - start_time:.2f}초 프레임수 : {self.frame_cnt}")
 
@@ -176,19 +176,19 @@ class OpticalFlowExtractor:
             self.frame_idx += 1
             self.frame_queue.put((frame, self.frame_idx))
 
-            """if not self.result_queue.empty():
+            if not self.result_queue.empty():
                 result_frame, _ = self.result_queue.get()
                 cv.imshow("Optical Flow", result_frame)
 
-            if cv.waitKey(1) & 0xFF == 27:
+            if cv.waitKey(30) & 0xFF == 27:
                 self.frame_queue.put(None)
-                break"""
+                break
 
         thread.join()
         self.cap.release()
         #cv.destroyAllWindows()
 
-root_path = r"D:\041.낙상사고 위험동작 영상-센서 쌍 데이터\3.개방데이터\1.데이터\Validation\01.원천데이터\VS\영상"
+"""root_path = r"D:\041.낙상사고 위험동작 영상-센서 쌍 데이터\3.개방데이터\1.데이터\Validation\01.원천데이터\VS\영상"
 all_videos = glob.glob(os.path.join(root_path, "**", "*.mp4"), recursive=True)
 print(len(all_videos))
 part_index = 0
@@ -210,7 +210,10 @@ for i, video in enumerate(all_videos):
         filename = f"data_part{part_index}.json"
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(merged_data, f, ensure_ascii=False, indent=4, default=lambda o: float(o) if isinstance(o, (np.floating, np.integer)) else str(o))
-        merged_data = []
+        merged_data = []"""
+        
+extractor = OpticalFlowExtractor("fall.mp4")
+extractor.run()
 
 """with open("data.json", "w", encoding="utf-8") as f:
     json.dump(merged_data, f, ensure_ascii=False, indent=4, default=lambda o: float(o) if isinstance(o, (np.floating, np.integer)) else str(o))"""
