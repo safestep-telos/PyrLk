@@ -1,171 +1,202 @@
+import torch
+import torch.nn as nn
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+
 import numpy as np
 import cv2 as cv
 import threading
-import time
-import os
-import glob
-import json
 from queue import Queue
-from mediapipe.tasks import python as mp_python
-from mediapipe.tasks.python.vision import PoseLandmarker, PoseLandmarkerOptions
-from mediapipe.framework.formats import landmark_pb2
+import time
+import collections
+import pickle
+import mediapipe as mp
 
-# MediaPipe Landmarker 설정
-model_path = "pose_landmarker_heavy.task"
-options = PoseLandmarkerOptions(
-    base_options=mp_python.BaseOptions(model_asset_path=model_path),
-    running_mode=mp_python.vision.RunningMode.VIDEO,
-    output_segmentation_masks=False,
-    num_poses=5  # 다중 포즈 검출
-)
-pose_model = PoseLandmarker.create_from_options(options)
+mp_pose = mp.solutions.pose
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#out = cv.VideoWriter('output1.mp4', cv.VideoWriter_fourcc(*'XVID'), 30, (1280, 720))
 
-class OpticalFlowExtractor:
-    def __init__(self, video_path):
-        self.video_path = video_path
+class RealTimeFallDetector:
+    def __init__(self, video_path, model_path, scaler_path):
         self.cap = cv.VideoCapture(video_path)
-        self.fps = self.cap.get(cv.CAP_PROP_FPS)
-        self.frame_cnt = self.cap.get(cv.CAP_PROP_FRAME_COUNT)
-        self.runtime = self.frame_cnt / self.fps
-
-        self.lk_params = dict(
-            winSize=(15, 15),
-            maxLevel=3,
-            criteria=(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 10, 0.03)
-        )
-
-        self.frame_queue = Queue()
-        self.result_queue = Queue()
-        self.data = []
+        self.pose = mp_pose.Pose(static_image_mode=False, model_complexity=0)
+        self.prev_gray = None
+        self.prev_landmarks = collections.deque(maxlen=3)
+        self.pose_landmarks = None
+        self.pose_next_try = 0
         self.frame_idx = 0
-        self.prev = None
 
-    def calc_optical_flow(self):
-        step = 32
-        roi_radius = 32
-        start_time = time.time()
+        self.model = FallTransformer().to(device)
+        self.model.load_state_dict(torch.load(model_path, map_location=device))
+        self.model.eval()
 
-        while True:
-            frame_info = self.frame_queue.get()
-            if frame_info is None:
-                break
+        with open(scaler_path, "rb") as f:
+            self.scaler = pickle.load(f)
 
-            frame, frame_idx = frame_info
-            frame = cv.resize(frame, (640, 360))
-            height, width = frame.shape[:2]
+        self.feature_queue = collections.deque(maxlen=15)
 
-            grid_points = [[x, y] for y in range(step // 2, height, step) for x in range(step // 2, width, step)]
+    def get_pose_landmarks(self, frame):
+        rgb = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+        results = self.pose.process(rgb)
+        if results.pose_landmarks:
+            return [(lm.x, lm.y) for lm in results.pose_landmarks.landmark]
+        return None
 
-            if self.prev is None:
-                self.prev = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-                self.data.append(self._empty_feature(frame_idx))
-                continue
-
-            roi_points = []
-            if frame_idx % 3 == 1:
-                mp_image = mp_python.vision.Image(image_format=mp_python.vision.ImageFormat.SRGB, data=frame)
-                detection_result = pose_model.detect_for_video(mp_image, int(frame_idx * (1000 / self.fps)))
-
-                for person in detection_result.pose_landmarks:
-                    for idx in [0, 23, 24, 15, 16, 27, 28]:
-                        lm = person[idx]
-                        cx, cy = int(lm.x * width), int(lm.y * height)
-                        for x, y in grid_points:
-                            if abs(cx - x) <= roi_radius and abs(cy - y) <= roi_radius:
-                                roi_points.append([x, y])
-
-            if not roi_points:
-                self.prev = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-                self.data.append(self._empty_feature(frame_idx))
-                continue
-
-            p0 = np.array(roi_points, dtype=np.float32).reshape(-1, 1, 2)
-            curr = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-            p1, st, err = cv.calcOpticalFlowPyrLK(self.prev, curr, p0, None, **self.lk_params)
-
-            vectors = []
-            if p1 is not None:
-                good_new = p1[st == 1]
-                good_old = p0[st == 1]
-                for new, old in zip(good_new, good_old):
-                    a, b = new.ravel()
-                    c, d = old.ravel()
-                    dx, dy = a - c, b - d
-                    speed = np.sqrt(dx ** 2 + dy ** 2)
-                    degree = -np.degrees(np.arctan2(dy, dx))
-                    isDownwards = int(-135 < degree < -45)
-                    if 1 <= speed <= 15:
-                        vectors.append({"x": c, "y": d, "dx": dx, "dy": dy, "t": speed, "a": degree, "isdown": isDownwards})
-
-            self.data.append(self._compute_feature(frame_idx, vectors))
-            self.prev = curr
-
-        print(f"[INFO] Runtime {self.runtime:.2f} 처리 완료. 실행시간: {time.time() - start_time:.2f}초 프레임수 : {self.frame_cnt}")
-
-    def _empty_feature(self, frame_idx):
-        return {
-            "time": time.time(),
-            "frame_index": frame_idx,
-            "fall": 0,
-            "features": {k: 0.0 for k in ["vec_num", "down_ratio", "speed_mean", "speed_std", "angle_mean", "angle_std", "fastdown_num"]}
-        }
-
-    def _compute_feature(self, frame_idx, vectors):
+    def extract_features(self, vectors):
         if not vectors:
-            return self._empty_feature(frame_idx)
+            return [0.0] * 12
         speeds = [v["t"] for v in vectors]
         angles = [v["a"] for v in vectors]
         isdowns = [v["isdown"] for v in vectors]
         fastdowns = [1 for v in vectors if v["isdown"] and v["t"] > 6]
-        return {
-            "time": time.time(),
-            "frame_index": frame_idx,
-            "fall": 0,
-            "features": {
-                "vec_num": float(len(vectors)),
-                "down_ratio": float(sum(isdowns) / len(vectors)),
-                "speed_mean": float(np.mean(speeds)),
-                "speed_std": float(np.std(speeds)),
-                "angle_mean": float(np.mean(angles)),
-                "angle_std": float(np.std(angles)),
-                "fastdown_num": float(len(fastdowns))
-            }
-        }
+        return [
+            len(vectors),
+            sum(isdowns) / len(vectors),
+            np.mean(speeds),
+            np.std(speeds),
+            np.std(angles),
+            len(fastdowns),
+            0.0, 0.0, 0.0,  # delta features
+            0.0, 0.0, 0.0   # accel
+        ]
 
     def run(self):
-        thread = threading.Thread(target=self.calc_optical_flow)
-        thread.start()
+        start_time = time.time()
         while True:
             ret, frame = self.cap.read()
             if not ret:
-                self.frame_queue.put(None)
                 break
             self.frame_idx += 1
-            self.frame_queue.put((frame, self.frame_idx))
-        thread.join()
-        self.cap.release()
+            #frame = frame[:, frame.shape[1]*4//7:, :]
+            frame = cv.resize(frame, (640, 360))
+            height, width = frame.shape[:2]
+            gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
 
-# 실행 코드
-"""root_path = r"D:\041.낙상사고 위험동작 영상-센서 쌍 데이터\3.개방데이터\1.데이터\Validation\01.원천데이터\VS\영상"
-all_videos = glob.glob(os.path.join(root_path, "**", "*.mp4"), recursive=True)
-print(len(all_videos))
-part_index = 0
-merged_data = []
-for i, video in enumerate(all_videos):
-    print(i+1, os.path.basename(video))
-    extractor = OpticalFlowExtractor(video)
-    extractor.run()
-    merged_data.append({
-        "vid_id": i + 1,
-        "vid_name": os.path.basename(video),
-        "frames": extractor.data
-    })
-    if (i + 1) % 1000 == 0 or (i + 1) == len(all_videos):
-        part_index += 1
-        filename = f"data_part{part_index \}.json"
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(merged_data, f, ensure_ascii=False, indent=4, default=lambda o: float(o) if isinstance(o, (np.floating, np.integer)) else str(o))
-        merged_data = []"""
+            # 포즈 업데이트
+            if self.frame_idx >= self.pose_next_try:
+                landmarks = self.get_pose_landmarks(frame)
+                if landmarks and len(landmarks) >= 33:
+                    self.pose_landmarks = [(int(x * width), int(y * height)) for x, y in landmarks]
+                    self.prev_landmarks.append(self.pose_landmarks)
+                    self.pose_next_try = self.frame_idx + 2
+                else:
+                    self.pose_next_try = self.frame_idx + 1
+
+            # ROI 설정
+            roi_points = []
+            if self.pose_landmarks:
+                lm_indices = [0, 11, 12, 23, 24, 25, 26, 27, 28]
+                for i in lm_indices:
+                    cx, cy = self.pose_landmarks[i]
+                    for x in range(cx - 32, cx + 32, 16):
+                        for y in range(cy - 32, cy + 32, 16):
+                            if 0 <= x < width and 0 <= y < height:
+                                roi_points.append([x, y])
+
+            vectors = []
+            if self.prev_gray is not None and roi_points:
+                p0 = np.array(roi_points, dtype=np.float32).reshape(-1, 1, 2)
+                p1, st, err = cv.calcOpticalFlowPyrLK(self.prev_gray, gray, p0, None,
+                                                      winSize=(15, 15), maxLevel=3,
+                                                      criteria=(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 10, 0.03))
+                if p1 is not None:
+                    good_new = p1[st == 1]
+                    good_old = p0[st == 1]
+                    for new, old in zip(good_new, good_old):
+                        a, b = new.ravel()
+                        c, d = old.ravel()
+                        dx, dy = a - c, b - d
+                        speed = np.sqrt(dx ** 2 + dy ** 2)
+                        degree = -np.degrees(np.arctan2(dy, dx))
+                        isDownwards = int(-135 < degree < -45)
+                        if 1 <= speed <= 15:
+                            vectors.append({"x": c, "y": d, "dx": dx, "dy": dy, "t": speed, "a": degree, "isdown": isDownwards})
+
+            vec = self.extract_features(vectors)
+
+            vec_scaled = self.scaler.transform(np.array(vec).reshape(1, -1))
+            self.feature_queue.append(vec_scaled.flatten())
+            self.prev_gray = gray
+            text = ""
+            if len(self.feature_queue) == 15:
+                X_input = torch.tensor([list(self.feature_queue)], dtype=torch.float32).to(device)
+                with torch.no_grad():
+                    output = self.model(X_input)
+                    pred = (output > 0.5).int().item()
+                    text = f"Frame: {self.frame_idx} | isFall : {'Yes' if pred else 'No'}"
+                    print(text)
+            """frame = cv.resize(frame, (1280, 720))
+            cv.putText(frame, text, (150, 70), cv.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2)
+            cv.imshow("Real-Time Fall Detection", frame)
+            #out.write(frame)
+            if cv.waitKey(1) & 0xFF == ord('q'):
+                break"""
+        end_time = time.time()  # 처리 종료 시간
+        elapsed_time = end_time - start_time
+        print(f"\n[INFO] 영상 처리에 걸린 시간 (초): {elapsed_time:.2f}")
+        print(f"[INFO] 프레임당 평균 처리 시간: {elapsed_time / self.frame_idx:.4f} 초")
         
-extractor = OpticalFlowExtractor("people.mp4")
+        self.cap.release()
+        cv.destroyAllWindows()
+
+class FallTransformer(nn.Module):
+    def __init__(self, feature_dim=12, seq_len=15, d_model=64, nhead=4, num_layers=2):
+        super(FallTransformer, self).__init__()
+        self.embedding = nn.Linear(feature_dim, d_model)
+        self.pos_embed = nn.Parameter(torch.randn(1, seq_len, d_model))
+
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.classifier = nn.Linear(d_model, 1)
+
+    def forward(self, x):  # x: [B, 15, 7]
+        x = self.embedding(x) + self.pos_embed[:, :x.size(1), :]
+        x = self.encoder(x)  # [B, 15, d_model]
+        x = x[:, x.size(1) // 2, :]  # 중심 프레임 추출
+        return self.classifier(x).squeeze()
+
+
+# 1. 영상에서 특징 추출 (1개 영상만 가정)
+video_path = r"D:\041.낙상사고 위험동작 영상-센서 쌍 데이터\3.개방데이터\1.데이터\Validation\01.원천데이터\VS\영상\Y\SY\00001_H_A_SY_C3\00001_H_A_SY_C3.mp4" #falltrue.mp4  fallfalse4.mp4 slide.mp4  # 실시간 영상을 대체할 샘플 영상
+realtime_detector = RealTimeFallDetector(video_path,"best_model2.pt", "best_scaler.pkl")
+realtime_detector.run()
+
+"""extractor = OpticalFlowExtractor(video_path)
 extractor.run()
+frames = extractor.data
+
+# 2. 특징 벡터만 추출하여 시퀀스 구성
+X_seq = [list(frame["features"].values()) for frame in frames]
+X_seq = np.array(X_seq)
+
+# 3. 전처리 (학습과 동일한 스케일링)
+#scaler = StandardScaler()
+with open("best_scaler.pkl", "rb") as f:
+    scaler = pickle.load(f)
+X_seq = scaler.transform(X_seq)
+
+# 4. 슬라이딩 윈도우 시퀀스 구성
+def create_sliding_windows(X_seq, window_size=15):
+    X_win = []
+    half = window_size // 2
+    for i in range(len(X_seq) - window_size + 1):
+        window = X_seq[i:i + window_size]
+        X_win.append(window)
+    return torch.from_numpy(np.array(X_win)).float()
+
+X_input = create_sliding_windows(X_seq)
+
+# 5. 모델 불러오기
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = FallTransformer(feature_dim=12, seq_len=15).to(device)
+model.load_state_dict(torch.load("best_model2.pt", map_location=device))
+model.eval()
+
+# 6. 예측 수행
+with torch.no_grad():
+    outputs = model(X_input.to(device))
+    preds = (outputs > 0.9).int().cpu().numpy()
+
+# 7. 결과 출력
+for i, pred in enumerate(preds):
+    print(f"Frame {i + 7} → 낙상 감지: {'Yes' if pred else 'No'}")"""

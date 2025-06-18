@@ -3,12 +3,12 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import fbeta_score
 
 import json
-import os
+import numpy as np
 
 root_path = r"D:\041.낙상사고 위험동작 영상-센서 쌍 데이터\3.개방데이터\1.데이터\Validation\02.라벨링데이터\VL\영상"
 X = []; y = []
 
-with open("data.json", "r",encoding="utf-8") as f:
+"""with open("data.json", "r",encoding="utf-8") as f:
     data1 = json.load(f)
 
 for i,video in enumerate(data1):
@@ -48,9 +48,10 @@ for i,video in enumerate(data1):
         if fall_start <= index <= fall_end:
             y.append(1)
         else:
-            y.append(0)
-
-X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2)
+            y.append(0)"""
+X_seq = np.load("X_seq.npy")
+y_seq = np.load("y_seq.npy")
+X_train, X_test, y_train, y_test = train_test_split(X_seq, y_seq, stratify=y_seq, test_size=0.2)
 
 model = RandomForestClassifier(n_estimators=100, class_weight="balanced")
 model.fit(X_train, y_train)

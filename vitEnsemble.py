@@ -6,6 +6,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import numpy as np
 from torchvision import models, transforms
+from PIL import Image
+import cv2 as cv
+import glob
+import os
+import pickle
 
 # FallTransformer (벡터 기반)
 class FallTransformer(nn.Module):
@@ -43,37 +48,55 @@ X_seq = scaler.fit_transform(X_seq)
 
 # 시퀀스 슬라이딩 윈도우
 window_size = 15
-X_win, y_win = [], []
+X_win, y_win, image_indices = [], [], []
 for i in range(len(X_seq) - window_size + 1):
     X_win.append(X_seq[i:i+window_size])
     y_win.append(y_seq[i + window_size // 2])
+    center = i + window_size // 2
+    image_indices.append(center)
 X_win = torch.tensor(np.array(X_win)).float()
 y_win = torch.tensor(np.array(y_win)).float()
 
-# 이미지 placeholder (예: 이미지 15장의 중앙 프레임 추출)
-image_tensor = torch.rand(len(y_win), 3, 224, 224)  # dummy input
+# 영상에서 프레임 추출
+"""root_path = r"/content/drive/MyDrive/영상"
+all_videos = glob.glob(os.path.join(root_path, "**", "*.mp4"), recursive=True)"""
+all_frames = []
+
+# 중앙 프레임만 추출 (X_win과 길이 일치)
+frames_dir = "/content/frames_parts"
+all_frame_tensors = []
+pt_files = sorted(glob.glob(os.path.join(frames_dir, "frames_part_*.pt")))
+for pt in pt_files:
+    all_frame_tensors.append(torch.load(pt))
+all_frames = torch.cat(all_frame_tensors, dim=0)
+image_tensor = torch.stack([all_frames[i] for i in image_indices])
+assert len(image_tensor) == len(X_win), "벡터와 이미지 개수가 다릅니다"
 
 # Train/Test split
 X_train_vec, X_test_vec, y_train, y_test, X_train_img, X_test_img = train_test_split(
-    X_win, y_win, image_tensor, stratify=y_win, test_size=0.2)
+    X_win, y_win, image_tensor, stratify=y_win, test_size=0.2, random_state=42)
 
 train_loader = DataLoader(TensorDataset(X_train_vec, X_train_img, y_train), batch_size=64, shuffle=True)
 test_loader = DataLoader(TensorDataset(X_test_vec, X_test_img, y_test), batch_size=64)
 
 # 모델 정의
-vector_model = FallTransformer().to("cuda")
-image_model = ImageTransformer().to("cuda")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+vector_model = FallTransformer().to(device)
+image_model = ImageTransformer().to(device)
 
 # 손실 함수와 옵티마이저
-criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([3.0]).to("cuda"))
-optimizer = torch.optim.Adam(list(vector_model.parameters()) + list(image_model.parameters()), lr=5e-4)
+criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([3.0]).to(device))
+optimizer = torch.optim.Adam(
+    list(vector_model.parameters()) + list(image_model.parameters()),
+    lr=5e-4
+)
 
 # 학습 루프
 for epoch in range(20):
     vector_model.train()
     image_model.train()
     for xb_vec, xb_img, yb in train_loader:
-        xb_vec, xb_img, yb = xb_vec.cuda(), xb_img.cuda(), yb.cuda()
+        xb_vec, xb_img, yb = xb_vec.to(device), xb_img.to(device), yb.to(device)
         optimizer.zero_grad()
         out_vec = vector_model(xb_vec)
         out_img = image_model(xb_img)
@@ -88,7 +111,7 @@ for epoch in range(20):
     y_pred_all, y_true_all = [], []
     with torch.no_grad():
         for xb_vec, xb_img, yb in test_loader:
-            xb_vec, xb_img = xb_vec.cuda(), xb_img.cuda()
+            xb_vec, xb_img = xb_vec.to(device), xb_img.to(device)
             out_vec = vector_model(xb_vec)
             out_img = image_model(xb_img)
             out = (out_vec + out_img) / 2

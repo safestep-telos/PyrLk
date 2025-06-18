@@ -44,8 +44,8 @@ def load_sequences_from_json(data_json_path, label_root_path, max_frames=600):
                 feature_dict["shoulder_accel"],
                 feature_dict["head_accel"],
             ]
-            if all(v == 0.0 for v in vec):
-                continue
+            """if all(v == 0.0 for v in vec):
+                continue"""
             X_seq.append(vec)
             index = frame["frame_index"]
             y_seq.append(1 if fall_start <= index <= fall_end else 0)
@@ -54,5 +54,7 @@ def load_sequences_from_json(data_json_path, label_root_path, max_frames=600):
 
 root_path = r"D:\041.낙상사고 위험동작 영상-센서 쌍 데이터\3.개방데이터\1.데이터\Validation\02.라벨링데이터\VL\영상"
 X_seq,y_seq = load_sequences_from_json("data.json",root_path)
-np.save("X_seq.npy", X_seq)
-np.save("y_seq.npy", y_seq)
+np.save("X_seq1.npy", X_seq)
+np.save("y_seq1.npy", y_seq)
+#np.save("X_seq.npy", X_seq)
+#np.save("y_seq.npy", y_seq)

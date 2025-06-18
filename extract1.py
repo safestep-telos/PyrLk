@@ -25,10 +25,11 @@ class OpticalFlowExtractor:
         self.pose_model = YOLO("yolov8n-pose.pt")  # 경량화된 YOLOv8n-pose 사용
         self.pose_next_try = 0
         self.frame_queue = Queue()
+        self.result_queue = Queue()
         self.data = []
         self.frame_idx = 0
         self.pose_landmarks = None
-        self.prev_landmarks = []
+        self.prev_fall_flags = []
 
     def get_pose_landmarks(self, frame):
         results = self.pose_model.predict(source=frame, conf=0.4, verbose=False)[0]
@@ -63,9 +64,6 @@ class OpticalFlowExtractor:
                 landmarks = self.get_pose_landmarks(frame)
                 if landmarks:
                     self.pose_landmarks = landmarks
-                    self.prev_landmarks.append(landmarks)
-                    if len(self.prev_landmarks) > 3:
-                        self.prev_landmarks.pop(0)
                     self.pose_next_try = frame_idx + 2
                 else:
                     self.pose_next_try = frame_idx + 1
@@ -83,6 +81,7 @@ class OpticalFlowExtractor:
             if not roi_points:
                 prev = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
                 self.data.append(self.empty_feature(frame_idx))
+                self.prev_fall_flags.append(False)
                 continue
 
             p0 = np.array(roi_points, dtype=np.float32).reshape(-1, 1, 2)
@@ -104,13 +103,20 @@ class OpticalFlowExtractor:
                         vectors.append({"x": c, "y": d, "dx": dx, "dy": dy, "t": speed, "a": degree, "isdown": isDownwards})
 
             self.data.append(self.extract_features(frame_idx, vectors))
-            prev = curr
+            self.prev_fall_flags.append(any(v["isdown"] and v["t"] > 6 for v in vectors))
+            if len(self.prev_fall_flags) > 30:
+                self.prev_fall_flags.pop(0)
 
+            prev = curr
+            self.result_queue.put((frame, vectors))
+            print(12)
+
+        print(f"[INFO] Runtime {self.runtime:.2f} 처리 완료. 실행시간:  {time.time() - start_time:.2f}초 프레임수 : {self.frame_cnt}")
 
     def empty_feature(self, frame_idx):
-        keys = ["vec_num", "down_ratio", "speed_mean", "speed_std", "angle_std", "fastdown_num",
-                "delta_vec_num", "delta_down_ratio", "delta_fastdown_num",
-                "hip_accel", "shoulder_accel", "head_accel"]
+        keys = ["vec_num", "down_ratio", "speed_mean", "speed_std", "angle_std",
+                "fastdown_ratio", "fall_vector_ratio", "fall_streak_ratio",
+                "longest_fall_streak", "max_speed"]
         return {
             "time": time.time(),
             "frame_index": frame_idx,
@@ -121,10 +127,23 @@ class OpticalFlowExtractor:
     def extract_features(self, frame_idx, vectors):
         if not vectors:
             return self.empty_feature(frame_idx)
+
         speeds = [v["t"] for v in vectors]
         angles = [v["a"] for v in vectors]
         isdowns = [v["isdown"] for v in vectors]
-        fastdowns = [1 for v in vectors if v["isdown"] and v["t"] > 6]
+        fall_like = [v for v in vectors if v["isdown"] and v["t"] > 6]
+
+        fall_streaks = 0
+        max_streak = 0
+        current_streak = 0
+        for flag in self.prev_fall_flags[-3:]:
+            if flag:
+                current_streak += 1
+                max_streak = max(max_streak, current_streak)
+            else:
+                current_streak = 0
+        if max_streak >= 3:
+            fall_streaks = 1
 
         feature = {
             "vec_num": float(len(vectors)),
@@ -132,27 +151,12 @@ class OpticalFlowExtractor:
             "speed_mean": float(np.mean(speeds)),
             "speed_std": float(np.std(speeds)),
             "angle_std": float(np.std(angles)),
-            "fastdown_num": float(len(fastdowns)),
-            "delta_vec_num": 0.0,
-            "delta_down_ratio": 0.0,
-            "delta_fastdown_num": 0.0,
-            "hip_accel": 0.0,
-            "shoulder_accel": 0.0,
-            "head_accel": 0.0
+            "fastdown_ratio": float(len(fall_like) / len(vectors)),
+            "fall_vector_ratio": float(len(fall_like) / len(vectors)),
+            "fall_streak_ratio": float(fall_streaks),
+            "longest_fall_streak": float(max_streak),
+            "max_speed": float(np.max(speeds))
         }
-
-        if len(self.data) >= 1:
-            prev_f = self.data[-1]["features"]
-            feature["delta_vec_num"] = feature["vec_num"] - prev_f["vec_num"]
-            feature["delta_down_ratio"] = feature["down_ratio"] - prev_f["down_ratio"]
-            feature["delta_fastdown_num"] = feature["fastdown_num"] - prev_f["fastdown_num"]
-
-        if len(self.prev_landmarks) >= 3:
-            p0, p1, p2 = [np.array(lms) for lms in self.prev_landmarks[-3:]]
-            for name, idx in [("hip_accel", 23), ("shoulder_accel", 11), ("head_accel", 0)]:
-                if np.all(p0[idx]) and np.all(p1[idx]) and np.all(p2[idx]):
-                    accel = np.linalg.norm(p0[idx] - 2 * p1[idx] + p2[idx])
-                    feature[name] = float(accel)
 
         return {
             "time": time.time(),
@@ -168,23 +172,35 @@ class OpticalFlowExtractor:
             ret, frame = self.cap.read()
             if not ret:
                 self.frame_queue.put(None)
+                print(123)
                 break
             self.frame_idx += 1
             self.frame_queue.put((frame, self.frame_idx))
 
+            if not self.result_queue.empty():
+                print(1)
+                result_frame, _ = self.result_queue.get()
+                cv.imshow("Optical Flow", result_frame)
+
+            if cv.waitKey(30) & 0xFF == 27:
+                self.frame_queue.put(None)
+                break
+
         thread.join()
         self.cap.release()
 
-# 실행 부분
 if __name__ == "__main__":
     root_path = r"D:\041.낙상사고 위험동작 영상-센서 쌍 데이터\3.개방데이터\1.데이터\Validation\01.원천데이터\VS\영상"
     all_videos = glob.glob(os.path.join(root_path, "**", "*.mp4"), recursive=True)
+
+    """with open(f"/content/drive/MyDrive/pyrlk/video_list.json", "r") as f:
+      all_videos = json.load(f)"""
 
     part_index = 0
     merged_data = []
 
     for i, video in enumerate(all_videos):
-        print(f"[{i+1}/{len(all_videos)}]")
+        print(f"[{i+1}/{len(all_videos)}]", video)
         vid_id = i + 1
         start_time = time.time()
         extractor = OpticalFlowExtractor(video)
@@ -197,9 +213,13 @@ if __name__ == "__main__":
             "frames": extractor.data
         })
 
-        if (i + 1) % 1000 == 0 or (i + 1) == len(all_videos):
+        """if (i + 1) % 1000 == 0 or (i + 1) == len(all_videos):
             part_index += 1
-            filename = f"data_part{part_index}.json"
+            #filename = f"data_part{part_index}.json"
+            save_dir = f"/content/drive/MyDrive/pyrlk"
+            filename = os.path.join(save_dir, f"data_part{part_index}.json")
             with open(filename, "w", encoding="utf-8") as f:
-                json.dump(merged_data, f, ensure_ascii=False, indent=4, default=lambda o: float(o) if isinstance(o, (np.floating, np.integer)) else str(o))
-            merged_data = []
+                json.dump(merged_data, f, ensure_ascii=False, indent=4,
+                          default=lambda o: float(o) if isinstance(o, (np.floating, np.integer)) else str(o))
+            merged_data = []"""
+
