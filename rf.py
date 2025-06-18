@@ -53,7 +53,7 @@ X_seq = np.load("X_seq.npy")
 y_seq = np.load("y_seq.npy")
 X_train, X_test, y_train, y_test = train_test_split(X_seq, y_seq, stratify=y_seq, test_size=0.2)
 
-model = RandomForestClassifier(n_estimators=100, class_weight="balanced")
+model = RandomForestClassifier(n_estimators=10, class_weight="balanced")
 model.fit(X_train, y_train)
 
 y_pred = model.predict(X_test)
